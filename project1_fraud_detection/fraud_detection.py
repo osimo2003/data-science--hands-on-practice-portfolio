@@ -193,3 +193,125 @@ for file in os.listdir('.'):
 
 print("\n PROJECT 1 COMPLETE!")
 print("Credit Card Fraud Detection model built and saved successfully!")
+
+# ============================================
+# BLOCK 7 — FINE TUNING XGBOOST MODEL
+# ============================================
+
+from sklearn.model_selection import RandomizedSearchCV
+import numpy as np
+
+print("\n=== STARTING XGBOOST FINE TUNING ===")
+
+# --- Define the hyperparameter grid ---
+param_grid = {
+    'n_estimators': [100, 200, 300, 500],
+    'max_depth': [3, 4, 5, 6, 7],
+    'learning_rate': [0.01, 0.05, 0.1, 0.2, 0.3],
+    'subsample': [0.6, 0.7, 0.8, 0.9, 1.0],
+    'colsample_bytree': [0.6, 0.7, 0.8, 0.9, 1.0],
+    'min_child_weight': [1, 3, 5, 7],
+    'scale_pos_weight': [1, 5, 10]
+}
+
+# --- Create base XGBoost model ---
+xgb_base = XGBClassifier(
+    random_state=42,
+    eval_metric='logloss',
+    n_jobs=-1
+)
+
+# --- Run RandomizedSearchCV ---
+xgb_tuned = RandomizedSearchCV(
+    estimator=xgb_base,
+    param_distributions=param_grid,
+    n_iter=50,
+    scoring='roc_auc',
+    cv=5,
+    random_state=42,
+    n_jobs=-1,
+    verbose=2
+)
+
+# --- Train the tuned model ---
+xgb_tuned.fit(X_train_smote, y_train_smote)
+
+# --- Show best parameters found ---
+print("\n=== BEST PARAMETERS FOUND ===")
+print(xgb_tuned.best_params_)
+
+print("\n=== BEST ROC-AUC SCORE DURING TUNING ===")
+print(f"{xgb_tuned.best_score_:.4f}")
+
+# --- Evaluate the tuned model on test data ---
+xgb_tuned_predictions = xgb_tuned.predict(X_test)
+xgb_tuned_proba = xgb_tuned.predict_proba(X_test)[:, 1]
+
+print("\n=== TUNED XGBOOST RESULTS ===")
+print(classification_report(y_test, xgb_tuned_predictions))
+print("ROC-AUC Score:", roc_auc_score(y_test, xgb_tuned_proba))
+
+# --- Confusion Matrix for Tuned Model ---
+tuned_cm = confusion_matrix(y_test, xgb_tuned_predictions)
+plt.figure(figsize=(8, 6))
+sns.heatmap(tuned_cm, annot=True, fmt='d', cmap='Greens',
+            xticklabels=['Normal', 'Fraud'],
+            yticklabels=['Normal', 'Fraud'])
+plt.title('Tuned XGBoost - Confusion Matrix')
+plt.ylabel('Actual')
+plt.xlabel('Predicted')
+plt.savefig('tuned_xgb_confusion_matrix.png')
+print("Tuned XGBoost Confusion Matrix saved!")
+
+# --- Compare Original vs Tuned XGBoost ---
+print("\n=== BEFORE vs AFTER FINE TUNING ===")
+print(f"Original XGBoost ROC-AUC:  {roc_auc_score(y_test, xgb_proba):.4f}")
+print(f"Tuned XGBoost ROC-AUC:     {roc_auc_score(y_test, xgb_tuned_proba):.4f}")
+
+# --- Save the tuned model ---
+joblib.dump(xgb_tuned.best_estimator_, 'xgboost_tuned_model.pkl')
+print("\nTuned XGBoost model saved as: xgboost_tuned_model.pkl")
+print("\nFine Tuning Complete!")
+
+# ============================================
+# BLOCK 8 — THRESHOLD TUNING FOR HIGHER PRECISION
+# ============================================
+
+from sklearn.metrics import precision_recall_curve
+
+print("\n=== THRESHOLD TUNING ===")
+
+# --- Get fraud probabilities ---
+xgb_proba_tuned = xgb_tuned.predict_proba(X_test)[:, 1]
+
+# --- Calculate precision and recall at different thresholds ---
+precisions, recalls, thresholds = precision_recall_curve(y_test, xgb_proba_tuned)
+
+# --- Find threshold where precision is above 90% ---
+print("\nThreshold Analysis:")
+print(f"{'Threshold':<15} {'Precision':<15} {'Recall':<15}")
+print("-" * 45)
+
+for threshold, precision, recall in zip(thresholds, precisions, recalls):
+    if precision >= 0.85:
+        print(f"{threshold:<15.2f} {precision:<15.2f} {recall:<15.2f}")
+
+# --- Plot Precision vs Recall curve ---
+plt.figure(figsize=(10, 6))
+plt.plot(thresholds, precisions[:-1], 'b--', label='Precision')
+plt.plot(thresholds, recalls[:-1], 'g-', label='Recall')
+plt.xlabel('Threshold')
+plt.ylabel('Score')
+plt.title('Precision vs Recall at Different Thresholds')
+plt.legend()
+plt.grid(True)
+plt.savefig('precision_recall_threshold.png')
+print("\nPrecision-Recall curve saved!")
+
+# --- Apply best threshold ---
+best_threshold = 0.7
+xgb_threshold_predictions = (xgb_proba_tuned >= best_threshold).astype(int)
+
+print(f"\n=== RESULTS AT THRESHOLD {best_threshold} ===")
+print(classification_report(y_test, xgb_threshold_predictions))
+print("ROC-AUC Score:", roc_auc_score(y_test, xgb_proba_tuned))
